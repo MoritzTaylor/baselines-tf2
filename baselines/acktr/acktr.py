@@ -13,37 +13,38 @@ from baselines.ppo2.ppo2 import safemean
 from collections import deque
 
 
-class Model(object):
+class Model(tf.keras.Model):
 
     def __init__(self, policy, ob_space, ac_space, nenvs, total_timesteps, nprocs=32, nsteps=20,
                  ent_coef=0.01, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.5,
                  kfac_clip=0.001, lrschedule='linear', is_async=True):
+        super(Model, self).__init__(name='ACKTRModel')
+
         nbatch = nenvs * nsteps
 
         self.model = step_model = policy(nenvs, 1)
         self.model2 = train_model = policy(nbatch, nsteps)
 
+        @tf.function
         def train(obs, states, rewards, masks, actions, values):
             advs = rewards - values
-            for step in range(len(obs)):
-                cur_lr = self.lr.value()
 
-            td_map = {train_model.X: obs, A: actions, ADV: advs, R: rewards, PG_LR: cur_lr, VF_LR: cur_lr}
-            if states is not None:
-                td_map[train_model.S] = states
-                td_map[train_model.M] = masks
+            with tf.GradientTape() as tape:
+                for step in range(len(obs)):
+                    cur_lr = self.lr.value()
 
-            policy_loss, value_loss, policy_entropy = calc_loss(obs,
-                                                             A=actions,
-                                                             ADV=advs,
-                                                             R=rewards,
-                                                             PG_LR=cur_lr,
-                                                             VF_LR=cur_lr)
+                policy_loss, value_loss, policy_entropy = calc_loss(obs,
+                                                                    A=actions,
+                                                                    ADV=advs,
+                                                                    R=rewards,
+                                                                    PG_LR=cur_lr,
+                                                                    VF_LR=cur_lr)
 
             return policy_loss, value_loss, policy_entropy
 
         self.train = train
 
+        @tf.function
         def calc_loss(obs, A, ADV, R, PG_LR, VF_LR):
             neglogpac = train_model.pd.neglogp(A)
             self.logits = train_model.pi
