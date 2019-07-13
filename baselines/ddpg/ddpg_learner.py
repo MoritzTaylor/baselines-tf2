@@ -34,7 +34,7 @@ def reduce_var(x, axis=None, keepdims=False):
     devs_squared = tf.square(x - m)
     return tf.reduce_mean(devs_squared, axis=axis, keepdims=keepdims)
 
-@tf.function(autograph=False)
+# @tf.function
 def update_perturbed_actor(actor, perturbed_actor, param_noise_stddev):
 
     for var, perturbed_var in zip(actor.variables, perturbed_actor.variables):
@@ -86,8 +86,8 @@ class DDPG(tf.Module):
             self.ret_rms = None
 
         # Create target networks.
-        self.target_actor = Actor(actor.nb_actions, observation_shape, name='target_actor', network=actor.network, **actor.network_kwargs)
         self.target_critic = Critic(actor.nb_actions, observation_shape, name='target_critic', network=critic.network, **critic.network_kwargs)
+        self.target_actor = Actor(actor.nb_actions, observation_shape, name='target_actor', network=actor.network, **actor.network_kwargs)
 
         # Set up parts.
         if self.param_noise is not None:
@@ -100,6 +100,44 @@ class DDPG(tf.Module):
         else:
             self.actor_optimizer = tf.keras.optimizers.Adam(learning_rate=actor_lr)
             self.critic_optimizer = tf.keras.optimizers.Adam(learning_rate=critic_lr)
+
+        logger.info('setting up actor optimizer')
+        actor_shapes = [var.get_shape().as_list() for var in self.actor.trainable_variables]
+        actor_nb_params = sum([reduce(lambda x, y: x * y, shape) for shape in actor_shapes])
+        logger.info('  actor shapes: {}'.format(actor_shapes))
+        logger.info('  actor params: {}'.format(actor_nb_params))
+        logger.info('setting up critic optimizer')
+        critic_shapes = [var.get_shape().as_list() for var in self.critic.trainable_variables]
+        critic_nb_params = sum([reduce(lambda x, y: x * y, shape) for shape in critic_shapes])
+        logger.info('  critic shapes: {}'.format(critic_shapes))
+        logger.info('  critic params: {}'.format(critic_nb_params))
+        if self.critic_l2_reg > 0.:
+            critic_reg_vars = []
+            for layer in self.critic.network_builder.layers[1:]:
+                critic_reg_vars.append(layer.kernel)
+            for var in critic_reg_vars:
+                logger.info('  regularizing: {}'.format(var.name))
+            logger.info('  applying l2 regularization with {}'.format(self.critic_l2_reg))
+
+        logger.info('setting up critic target updates ...')
+        for var, target_var in zip(self.critic.variables, self.target_critic.variables):
+            logger.info('  {} <- {}'.format(target_var.name, var.name))
+        logger.info('setting up actor target updates ...')
+        for var, target_var in zip(self.actor.variables, self.target_actor.variables):
+            logger.info('  {} <- {}'.format(target_var.name, var.name))
+
+        if self.param_noise:
+            logger.info('setting up param noise')
+            for var, perturbed_var in zip(self.actor.variables, self.perturbed_actor.variables):
+                if var in actor.perturbable_vars:
+                    logger.info('  {} <- {} + noise'.format(perturbed_var.name, var.name))
+                else:
+                    logger.info('  {} <- {}'.format(perturbed_var.name, var.name))
+            for var, perturbed_var in zip(self.actor.variables, self.perturbed_adaptive_actor.variables):
+                if var in actor.perturbable_vars:
+                    logger.info('  {} <- {} + noise'.format(perturbed_var.name, var.name))
+                else:
+                    logger.info('  {} <- {}'.format(perturbed_var.name, var.name))
 
         if self.normalize_returns and self.enable_popart:
             self.setup_popart()
@@ -158,12 +196,8 @@ class DDPG(tf.Module):
             if self.normalize_observations:
                 self.obs_rms.update(np.array([obs0[b]]))
 
-    @tf.function(autograph=False)
     def train(self, obs0, obs1, actions, rewards, terminals1):
-        # Get a batch.
-        normalized_obs1 = tf.clip_by_value(normalize(obs1, self.obs_rms), self.observation_range[0], self.observation_range[1])
-        Q_obs1 = denormalize(self.target_critic(normalized_obs1, self.target_actor(normalized_obs1)), self.ret_rms)
-        target_Q = rewards + (1. - terminals1) * self.gamma * Q_obs1
+        normalized_obs0, target_Q = self.compute_normalized_obs0_and_target_Q(obs0, obs1, rewards, terminals1)
 
         if self.normalize_returns and self.enable_popart:
             old_mean = self.ret_rms.mean
@@ -177,8 +211,26 @@ class DDPG(tf.Module):
                 kernel.assign(kernel * old_std / new_std)
                 bias.assign((bias * old_std + old_mean - new_mean) / new_std)
 
+        actor_grads, actor_loss = self.get_actor_grads(normalized_obs0)
+        actor_grads_and_vars = zip(actor_grads, self.actor.trainable_variables)
+        self.actor_optimizer.apply_gradients(actor_grads_and_vars)
 
+        critic_grads, critic_loss = self.get_critic_grads(normalized_obs0, actions, target_Q)
+        critic_grads_and_vars = zip(critic_grads, self.critic.trainable_variables)
+        self.critic_optimizer.apply_gradients(critic_grads_and_vars)
+
+        return critic_loss, actor_loss
+
+    @tf.function
+    def compute_normalized_obs0_and_target_Q(self, obs0, obs1, rewards, terminals1):
         normalized_obs0 = tf.clip_by_value(normalize(obs0, self.obs_rms), self.observation_range[0], self.observation_range[1])
+        normalized_obs1 = tf.clip_by_value(normalize(obs1, self.obs_rms), self.observation_range[0], self.observation_range[1])
+        Q_obs1 = denormalize(self.target_critic(normalized_obs1, self.target_actor(normalized_obs1)), self.ret_rms)
+        target_Q = rewards + (1. - terminals1) * self.gamma * Q_obs1
+        return normalized_obs0, target_Q
+
+    @tf.function(autograph=False)
+    def get_actor_grads(self, normalized_obs0):
         with tf.GradientTape() as tape:
             actor_tf = self.actor(normalized_obs0)
             # normalized_critic_tf = self.critic(normalized_obs0, actions)
@@ -189,10 +241,10 @@ class DDPG(tf.Module):
         actor_grads = tape.gradient(actor_loss, self.actor.trainable_variables)
         if self.clip_norm:
             actor_grads = [tf.clip_by_norm(grad, clip_norm=self.clip_norm) for grad in actor_grads]
-        actor_grads_and_vars = zip(actor_grads, self.actor.trainable_variables)
-        self.actor_optimizer.apply_gradients(actor_grads_and_vars)
+        return actor_grads, actor_loss
 
-
+    @tf.function(autograph=False)
+    def get_critic_grads(self, normalized_obs0, actions, target_Q):
         with tf.GradientTape() as tape:
             normalized_critic_tf = self.critic(normalized_obs0, actions)
             normalized_critic_target_tf = tf.clip_by_value(normalize(target_Q, self.ret_rms), self.return_range[0], self.return_range[1])
@@ -204,10 +256,8 @@ class DDPG(tf.Module):
         critic_grads = tape.gradient(critic_loss, self.critic.trainable_variables)
         if self.clip_norm:
             critic_grads = [tf.clip_by_norm(grad, clip_norm=self.clip_norm) for grad in critic_grads]
-        critic_grads_and_vars = zip(critic_grads, self.critic.trainable_variables)
-        self.critic_optimizer.apply_gradients(critic_grads_and_vars)
+        return critic_grads, critic_loss
 
-        return critic_loss, actor_loss
 
     def initialize(self):
         if MPI is not None:
@@ -272,7 +322,7 @@ class DDPG(tf.Module):
         mean_distance = self.get_mean_distance(obs0)
 
         if MPI is not None:
-            mean_distance = MPI.COMM_WORLD.allreduce(mean_distance, op=MPI.SUM) / MPI.COMM_WORLD.Get_size()
+            mean_distance = MPI.COMM_WORLD.allreduce(mean_distance.numpy(), op=MPI.SUM) / MPI.COMM_WORLD.Get_size()
 
         self.param_noise.adapt(mean_distance)
         return mean_distance
