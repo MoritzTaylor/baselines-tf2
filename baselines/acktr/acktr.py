@@ -50,6 +50,7 @@ class Model(tf.keras.Model):
         advs = rewards - values
 
         with tf.GradientTape() as tape:
+            # TODO: explicit watching gradients with tape.watch(x)?
             for step in range(len(obs)):
                 cur_lr = self.lr.value()
 
