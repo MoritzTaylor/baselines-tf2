@@ -236,7 +236,7 @@ class KfacOptimizer():
                                     # support homogeneous coordinate, assnBias
                                     # is always None
                                     fpropFactor2_size = Kh * Kw
-                                    slot_fpropFactor_stats2 = tf.Variable(tf.diag(tf.ones(
+                                    slot_fpropFactor_stats2 = tf.Variable(tf.linalg.diag(tf.ones(
                                         [fpropFactor2_size])) * self._diag_init_coeff, name='KFAC_STATS/' + fpropFactor.op.name, trainable=False)
                                     self.stats[var]['fprop_concat_stats'].append(
                                         slot_fpropFactor_stats2)
@@ -254,7 +254,7 @@ class KfacOptimizer():
                             if not self._blockdiag_bias and self.stats[var]['assnBias']:
                                 fpropFactor_size += 1
 
-                            slot_fpropFactor_stats = tf.Variable(tf.diag(tf.ones(
+                            slot_fpropFactor_stats = tf.Variable(tf.linalg.diag(tf.ones(
                                 [fpropFactor_size])) * self._diag_init_coeff, name='KFAC_STATS/' + fpropFactor.op.name, trainable=False)
                             self.stats[var]['fprop_concat_stats'].append(
                                 slot_fpropFactor_stats)
@@ -270,7 +270,7 @@ class KfacOptimizer():
                         # using homogeneous coordinates
                         if not((not self._blockdiag_bias) and self.stats[var]['assnWeights']):
                             if bpropFactor not in tmpStatsCache:
-                                slot_bpropFactor_stats = tf.Variable(tf.diag(tf.ones([bpropFactor.get_shape(
+                                slot_bpropFactor_stats = tf.Variable(tf.linalg.diag(tf.ones([bpropFactor.get_shape(
                                 )[-1]])) * self._diag_init_coeff, name='KFAC_STATS/' + bpropFactor.op.name, trainable=False)
                                 self.stats[var]['bprop_concat_stats'].append(
                                     slot_bpropFactor_stats)
@@ -282,10 +282,10 @@ class KfacOptimizer():
 
         return self.stats
 
-    def compute_and_apply_stats(self, loss_sampled, var_list=None):
+    def compute_and_apply_stats(self, loss_sampled, var_list):
         varlist = var_list
-        if varlist is None:
-            varlist = tf.trainable_variables()
+        #if varlist is None:
+        #    varlist = tf.trainable_variables()
 
         stats = self.compute_stats(loss_sampled, var_list=varlist)
         return self.apply_stats(stats)
@@ -338,7 +338,7 @@ class KfacOptimizer():
                                 if KFAC_DEBUG:
                                     print(('approx %s act factor with rank-1 SVD factors' % (var.name)))
                                 # find closest rank-1 approx to the feature map
-                                S, U, V = tf.batch_svd(tf.reshape(
+                                S, U, V = tf.batch_svd(tf.reshape( # TODO
                                     fpropFactor, [-1, KH * KW, C]))
                                 # get rank-1 approx slides
                                 sqrtS1 = tf.expand_dims(tf.sqrt(S[:, 0, 0]), 1)
@@ -480,18 +480,14 @@ class KfacOptimizer():
             stats_new = statsUpdates[stats_var]
             if accumulate:
                 # simple superbatch averaging
-                update_op = tf.assign_add(
-                    stats_var, accumulateCoeff * stats_new, use_locking=True)
+                stats_var.assign_add(accumulateCoeff * stats_new, use_locking=True)
             else:
                 # exponential running averaging
-                update_op = tf.assign(
-                    stats_var, stats_var * self._stats_decay, use_locking=True)
-                update_op = tf.assign_add(
-                    update_op, (1. - self._stats_decay) * stats_new, use_locking=True)
-            updateOps.append(update_op)
+                stats_var.assign(stats_var * self._stats_decay, use_locking=True)
+                stats_var.assign_add((1. - self._stats_decay) * stats_new, use_locking=True)
 
         with tf.control_dependencies(updateOps):
-            stats_step_op = tf.assign_add(self.stats_step, 1)
+            self.stats_step.assign_add(1)
 
         if KFAC_DEBUG:
             stats_step_op = (tf.Print(stats_step_op,
@@ -524,7 +520,7 @@ class KfacOptimizer():
                                 stats_dim = stats_var.get_shape()[1].value
                                 e = tf.Variable(tf.ones(
                                     [stats_dim]), name='KFAC_FAC/' + stats_var.name.split(':')[0] + '/e', trainable=False)
-                                Q = tf.Variable(tf.diag(tf.ones(
+                                Q = tf.Variable(tf.linalg.diag(tf.ones(
                                     [stats_dim])), name='KFAC_FAC/' + stats_var.name.split(':')[0] + '/Q', trainable=False)
                                 stats_eigen[stats_var] = {'e': e, 'Q': Q}
                                 tmpEigenCache[
@@ -604,16 +600,13 @@ class KfacOptimizer():
         print(('updating %d eigenvalue/vectors' % len(eigen_list)))
         for i, (tensor, mark) in enumerate(zip(eigen_list, self.eigen_update_list)):
             stats_eigen_var = self.eigen_reverse_lookup[mark]
-            updateOps.append(
-                tf.assign(stats_eigen_var, tensor, use_locking=True))
+            stats_eigen_var.assign(tensor, use_locking=True)
 
         with tf.control_dependencies(updateOps):
-            factor_step_op = tf.assign_add(self.factor_step, 1)
-            updateOps.append(factor_step_op)
+            self.factor_step.assign_add(1)
             if KFAC_DEBUG:
                 updateOps.append(tf.Print(tf.constant(
                     0.), [tf.convert_to_tensor('updated kfac factors')]))
-        return updateOps
 
     def getKfacPrecondUpdates(self, gradlist, varlist):
         updatelist = []
@@ -793,14 +786,15 @@ class KfacOptimizer():
         if KFAC_DEBUG:
             scaling = tf.Print(scaling, [tf.convert_to_tensor(
                 'clip: '), scaling, tf.convert_to_tensor(' vFv: '), vg])
-        with tf.control_dependencies([tf.assign(self.vFv, vg)]):
+        with tf.control_dependencies([self.vFv.assign_add(vg)]):
             updatelist = [grad_dict[var] for var in varlist]
             for i, item in enumerate(updatelist):
                 updatelist[i] = scaling * item
 
         return updatelist
 
-    def compute_gradients(self, loss, var_list=None):
+    # TODO: Not really used!
+    def compute_gradients(self, loss, var_list):
         varlist = var_list
         if varlist is None:
             varlist = tf.trainable_variables()
@@ -833,7 +827,8 @@ class KfacOptimizer():
             qr = tf.train.QueueRunner(queue, [enqueue_op])
 
         updateOps = []
-        global_step_op = tf.assign_add(self.global_step, 1)
+        self.global_step.assign_add(1)
+        #global_step_op = tf.assign_add(self.global_step, 1)
         updateOps.append(global_step_op)
 
         with tf.control_dependencies([global_step_op]):
@@ -847,7 +842,7 @@ class KfacOptimizer():
 
             with tf.control_dependencies(dependency_list):
                 def no_op_wrapper():
-                    return tf.group(*[tf.assign_add(self.cold_step, 1)])
+                    return tf.group(*[self.cold_step.assign_add(1)])
 
                 if not self._async:
                     # synchronous eigen-decomp updates
@@ -906,7 +901,7 @@ class KfacOptimizer():
 
             sgd_grads = list(zip(sgd_grads,sgd_var))
 
-            sgd_step_op = tf.assign_add(self.sgd_step, 1)
+            self.sgd_step.assign_add(1)
             coldOptim_op = coldOptim.apply_gradients(sgd_grads)
             if KFAC_DEBUG:
                 with tf.control_dependencies([sgd_step_op, coldOptim_op]):
@@ -921,6 +916,7 @@ class KfacOptimizer():
 
         return tf.cond(tf.greater(self.sgd_step, self._cold_iter), warmKFACstart, coldSGDstart), qr
 
+    # TODO: Not used
     def minimize(self, loss, loss_sampled, var_list=None):
         grads = self.compute_gradients(loss, var_list=var_list)
         update_stats_op = self.compute_and_apply_stats(

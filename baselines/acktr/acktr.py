@@ -78,6 +78,7 @@ class Model(tf.keras.Model):
         self.joint_fisher = joint_fisher_loss = pg_fisher_loss + vf_fisher_loss
 
         self.params = params = tape.watched_variables() #before: find_trainable_variables("acktr_model")
+        #self.param = param = self.trainable_variables() # TODO: Defining variables before?
 
         self.grads_check = grads = tape.gradient(train_loss, params) # tf.gradients(train_loss, params)
         grads_and_params = list(zip(grads, params))
