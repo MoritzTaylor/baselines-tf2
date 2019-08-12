@@ -29,15 +29,16 @@ class Runner(AbstractEnvRunner):
             # We already have self.obs because Runner superclass run self.obs[:] = env.reset() on init
             obs = tf.constant(self.obs)
             actions, values, self.states, neglogpacs = self.model.step(obs)
+            actions = actions._numpy()
             mb_obs.append(self.obs.copy())
             mb_actions.append(actions)
-            mb_values.append(values)
-            mb_neglogpacs.append(neglogpacs)
+            mb_values.append(values._numpy())
+            mb_neglogpacs.append(neglogpacs._numpy())
             mb_dones.append(self.dones)
 
             # Take actions in env and look the results
             # Infos contains a ton of useful informations
-            self.obs[:], rewards, self.dones, infos = self.env.step(actions.numpy())
+            self.obs[:], rewards, self.dones, infos = self.env.step(actions)
             for info in infos:
                 maybeepinfo = info.get('episode')
                 if maybeepinfo: epinfos.append(maybeepinfo)
@@ -46,11 +47,11 @@ class Runner(AbstractEnvRunner):
         #batch of steps to batch of rollouts
         mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32)
-        mb_actions = np.asarray(mb_actions, dtype=np.int32)
+        mb_actions = np.asarray(mb_actions)
         mb_values = np.asarray(mb_values, dtype=np.float32)
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
-        last_values = self.model.value(tf.constant(self.obs))
+        last_values = self.model.value(tf.constant(self.obs))._numpy()
 
         # discount/bootstrap off value fn
         mb_returns = np.zeros_like(mb_rewards)
