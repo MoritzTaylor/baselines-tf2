@@ -12,7 +12,10 @@ KFAC_DEBUG = False
 
 class KfacOptimizer():
 
-    def __init__(self, learning_rate=0.01, momentum=0.9, clip_kl=0.01, kfac_update=2, stats_accum_iter=60, full_stats_init=False, cold_iter=100, cold_lr=None, is_async=False, async_stats=False, epsilon=1e-2, stats_decay=0.95, blockdiag_bias=False, channel_fac=False, factored_damping=False, approxT2=False, use_float64=False, weight_decay_dict={},max_grad_norm=0.5):
+    def __init__(self, learning_rate=0.01, momentum=0.9, clip_kl=0.01, kfac_update=2, stats_accum_iter=60,
+                 full_stats_init=False, cold_iter=100, cold_lr=None, is_async=False, async_stats=False,
+                 epsilon=1e-2, stats_decay=0.95, blockdiag_bias=False, channel_fac=False, factored_damping=False,
+                 approxT2=False, use_float64=False, weight_decay_dict={},max_grad_norm=0.5):
         self.max_grad_norm = max_grad_norm
         self._lr = learning_rate
         self._momentum = momentum
@@ -292,8 +295,8 @@ class KfacOptimizer():
 
     def compute_stats(self, loss_sampled, var_list=None):
         varlist = var_list
-        if varlist is None:
-            varlist = tf.trainable_variables()
+        #if varlist is None:
+        #    varlist = tf.trainable_variables()
 
         gs = tf.gradients(loss_sampled, varlist, name='gradientsSampled')
         self.gs = gs
@@ -793,7 +796,7 @@ class KfacOptimizer():
 
         return updatelist
 
-    # TODO: Not really used!
+    # TODO: Not really used!?
     def compute_gradients(self, loss, var_list):
         varlist = var_list
         if varlist is None:
@@ -890,33 +893,54 @@ class KfacOptimizer():
         return tf.group(*updateOps), qr
 
     def apply_gradients(self, grads):
-        coldOptim = tf.train.MomentumOptimizer(
-            self._cold_lr, self._momentum)
 
-        def coldSGDstart():
+        if self.sgd_step > self._cold_iter:
+            coldOptim = tf.train.MomentumOptimizer(self._cold_lr, self._momentum)
+
             sgd_grads, sgd_var = zip(*grads)
 
             if self.max_grad_norm != None:
-                sgd_grads, sgd_grad_norm = tf.clip_by_global_norm(sgd_grads,self.max_grad_norm)
+                sgd_grads, sgd_grad_norm = tf.clip_by_global_norm(sgd_grads, self.max_grad_norm)
 
-            sgd_grads = list(zip(sgd_grads,sgd_var))
+            sgd_grads = list(zip(sgd_grads, sgd_var))
 
             self.sgd_step.assign_add(1)
-            coldOptim_op = coldOptim.apply_gradients(sgd_grads)
+            coldOptim.apply_gradients(sgd_grads)
             if KFAC_DEBUG:
-                with tf.control_dependencies([sgd_step_op, coldOptim_op]):
-                    sgd_step_op = tf.Print(
-                        sgd_step_op, [self.sgd_step, tf.convert_to_tensor('doing cold sgd step')])
-            return tf.group(*[sgd_step_op, coldOptim_op])
+                print('{} doing cold sgd step'.format(self.sgd_step))
 
-        kfacOptim_op, qr = self.apply_gradients_kfac(grads)
+        else:
+            qr = self.apply_gradients_kfac(grads)
 
-        def warmKFACstart():
-            return kfacOptim_op
+        return qr
+        #
+        #
+        # coldOptim = tf.train.MomentumOptimizer(self._cold_lr, self._momentum)
+        #
+        # def coldSGDstart():
+        #     sgd_grads, sgd_var = zip(*grads)
+        #
+        #     if self.max_grad_norm != None:
+        #         sgd_grads, sgd_grad_norm = tf.clip_by_global_norm(sgd_grads, self.max_grad_norm)
+        #
+        #     sgd_grads = list(zip(sgd_grads,sgd_var))
+        #
+        #     self.sgd_step.assign_add(1)
+        #     coldOptim_op = coldOptim.apply_gradients(sgd_grads)
+        #     if KFAC_DEBUG:
+        #         with tf.control_dependencies([sgd_step_op, coldOptim_op]):
+        #             sgd_step_op = tf.Print(
+        #                 sgd_step_op, [self.sgd_step, tf.convert_to_tensor('doing cold sgd step')])
+        #     return tf.group(*[sgd_step_op, coldOptim_op])
+        #
+        # kfacOptim_op, qr = self.apply_gradients_kfac(grads)
+        #
+        # def warmKFACstart():
+        #     return kfacOptim_op
+        #
+        # return tf.cond(tf.greater(self.sgd_step, self._cold_iter), warmKFACstart, coldSGDstart), qr
 
-        return tf.cond(tf.greater(self.sgd_step, self._cold_iter), warmKFACstart, coldSGDstart), qr
-
-    # TODO: Not used
+    # TODO: Not used!?
     def minimize(self, loss, loss_sampled, var_list=None):
         grads = self.compute_gradients(loss, var_list=var_list)
         update_stats_op = self.compute_and_apply_stats(

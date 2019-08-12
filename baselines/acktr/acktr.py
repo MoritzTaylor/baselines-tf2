@@ -68,9 +68,10 @@ class Model(tf.keras.Model):
             pg_loss = pg_loss - self.ent_coef * entropy
             vf_loss = tf.losses.mean_squared_error(tf.squeeze(self.train_model.vf), rewards)
 
-        train_loss = pg_loss + self.vf_coef*vf_loss
+            train_loss = pg_loss + self.vf_coef*vf_loss
 
         ##Fisher loss construction
+        # TODO: This (up to def of params) also in 'with tf.GradientTape()'?
         self.pg_fisher = pg_fisher_loss = -tf.reduce_mean(neglogpac)
         sample_net = self.train_model.vf + tf.random_normal(tf.shape(self.train_model.vf))
         self.vf_fisher = vf_fisher_loss = - self.vf_fisher_coef * tf.reduce_mean(
@@ -78,14 +79,14 @@ class Model(tf.keras.Model):
         self.joint_fisher = joint_fisher_loss = pg_fisher_loss + vf_fisher_loss
 
         self.params = params = tape.watched_variables() #before: find_trainable_variables("acktr_model")
-        #self.param = param = self.trainable_variables() # TODO: Defining variables before?
 
         self.grads_check = grads = tape.gradient(train_loss, params) # tf.gradients(train_loss, params)
         grads_and_params = list(zip(grads, params))
 
         with tf.device('/gpu:0'):
-            # TODO: Everytime a new optim? Maybe adding 'learning_rate' param somewhere else?
-            # TODO: Decide when kfac was ported
+            # TODO:
+            #   Dec of the optimizer in init?
+            #   cur_lr, states, advs, actions, rewards as inputs
             self.optim = optim = kfac.KfacOptimizer(learning_rate=cur_lr, clip_kl=self.kfac_clip, \
                                                     momentum=0.9, kfac_update=1, epsilon=0.01, \
                                                     stats_decay=0.99, is_async=self.is_async, cold_iter=10,
