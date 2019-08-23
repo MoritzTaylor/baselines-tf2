@@ -76,7 +76,7 @@ class LinearTimeDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
         with tf.name_scope(self.name):
             initial_learning_rate = tf.convert_to_tensor(self.initial_learning_rate, name="initial_learning_rate")
             dtype = initial_learning_rate.dtype
-            step_t = tf.cast(step, dtype)
+            step_t = tf.cast(step, dtype) # TODO: step_t = step/n_total_steps ?
             return initial_learning_rate * step_t
 
     def get_config(self):

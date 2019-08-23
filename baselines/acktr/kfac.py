@@ -460,7 +460,7 @@ class KfacOptimizer():
             # asynchronous stats update
             update_stats = self._apply_stats(statsUpdates)
 
-            queue = tf.FIFOQueue(1, [item.dtype for item in update_stats], shapes=[
+            queue = tf.queue.FIFOQueue(1, [item.dtype for item in update_stats], shapes=[
                                  item.get_shape() for item in update_stats])
             enqueue_op = queue.enqueue(update_stats)
 
@@ -796,7 +796,7 @@ class KfacOptimizer():
 
         return updatelist
 
-    # TODO: Not really used!?
+    # FixMe: Not used!?
     def compute_gradients(self, loss, var_list):
         varlist = var_list
         if varlist is None:
@@ -819,20 +819,26 @@ class KfacOptimizer():
             factorOps_dummy = self.computeStatsEigen()
 
             # define a queue for the list of factor loading tensors
-            queue = tf.FIFOQueue(1, [item.dtype for item in factorOps_dummy], shapes=[
+            # TODO: OLD: tf.FIFOQueue
+            queue = tf.queue.FIFOQueue(1, [item.dtype for item in factorOps_dummy], shapes=[
                                  item.get_shape() for item in factorOps_dummy])
-            enqueue_op = tf.cond(tf.logical_and(tf.equal(tf.mod(self.stats_step, self._kfac_update), tf.convert_to_tensor(
-                0)), tf.greater_equal(self.stats_step, self._stats_accum_iter)), lambda: queue.enqueue(self.computeStatsEigen()), tf.no_op)
+            enqueue_op = tf.cond(
+                tf.logical_and(tf.equal(tf.mod(self.stats_step, self._kfac_update),
+                                        tf.convert_to_tensor(0)),
+                               tf.greater_equal(self.stats_step, self._stats_accum_iter)),
+                lambda: queue.enqueue(self.computeStatsEigen()),
+                tf.no_op)
 
             def dequeue_op():
                 return queue.dequeue()
 
+            # TODO: QueueRunner is deprecated. To construct input pipelines, use the tf.data module
             qr = tf.train.QueueRunner(queue, [enqueue_op])
 
-        updateOps = []
-        self.global_step.assign_add(1)
+        #updateOps = []
+        #self.global_step.assign_add(1)
         #global_step_op = tf.assign_add(self.global_step, 1)
-        updateOps.append(global_step_op)
+        #updateOps.append(global_step_op)
 
         with tf.control_dependencies([global_step_op]):
 
@@ -851,7 +857,9 @@ class KfacOptimizer():
                     # synchronous eigen-decomp updates
                     updateFactorOps = tf.cond(tf.logical_and(tf.equal(tf.mod(self.stats_step, self._kfac_update),
                                                                       tf.convert_to_tensor(0)),
-                                                             tf.greater_equal(self.stats_step, self._stats_accum_iter)), lambda: tf.group(*self.applyStatsEigen(self.computeStatsEigen())), no_op_wrapper)
+                                                             tf.greater_equal(self.stats_step, self._stats_accum_iter)),
+                                              lambda: tf.group(*self.applyStatsEigen(self.computeStatsEigen())),
+                                              no_op_wrapper)
                 else:
                     # asynchronous eigen-decomp updates using queue
                     updateFactorOps = tf.cond(tf.greater_equal(self.stats_step, self._stats_accum_iter),
@@ -895,7 +903,8 @@ class KfacOptimizer():
     def apply_gradients(self, grads):
 
         if self.sgd_step > self._cold_iter:
-            coldOptim = tf.train.MomentumOptimizer(self._cold_lr, self._momentum)
+            #coldOptim = tf.train.MomentumOptimizer(self._cold_lr, self._momentum) # OLD
+            coldOptim = tf.keras.optimizers.SGD(learning_rate=self._cold_lr, momentum=self._momentum)
 
             sgd_grads, sgd_var = zip(*grads)
 
@@ -940,7 +949,7 @@ class KfacOptimizer():
         #
         # return tf.cond(tf.greater(self.sgd_step, self._cold_iter), warmKFACstart, coldSGDstart), qr
 
-    # TODO: Not used!?
+    # FixMe: Not used!?
     def minimize(self, loss, loss_sampled, var_list=None):
         grads = self.compute_gradients(loss, var_list=var_list)
         update_stats_op = self.compute_and_apply_stats(
