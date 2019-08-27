@@ -43,6 +43,7 @@ def discount_with_dones(rewards, dones, gamma):
         discounted.append(r)
     return discounted[::-1]
 
+
 class InverseLinearTimeDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
     def __init__(self, initial_learning_rate, nupdates, name="InverseLinearTimeDecay"):
         super(InverseLinearTimeDecay, self).__init__()
@@ -65,6 +66,7 @@ class InverseLinearTimeDecay(tf.keras.optimizers.schedules.LearningRateSchedule)
             "nupdates": self.nupdates,
             "name": self.name
         }
+
 
 class LinearTimeDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
     def __init__(self, initial_learning_rate, name="LinearTimeDecay"):

@@ -46,6 +46,10 @@ class Model(tf.keras.Model):
         self.vf_fisher_coef = vf_fisher_coef
         self.kfac_clip = kfac_clip
 
+        self.is_async = is_async
+        self.max_grad_norm = max_grad_norm
+        self.total_timesteps = total_timesteps
+
         # TODO: Learning rate schedule and definition of optimizer
         #self.lrschedule = lrschedule
         lrschedule = LinearTimeDecay(initial_learning_rate=lr) # TODO
@@ -53,9 +57,7 @@ class Model(tf.keras.Model):
                                         momentum=0.9, kfac_update=1, epsilon=0.01, \
                                         stats_decay=0.99, is_async=self.is_async, cold_iter=10,
                                         max_grad_norm=self.max_grad_norm)
-        self.is_asybc = is_async
-        self.max_grad_norm = max_grad_norm
-        self.total_timesteps = total_timesteps
+
 
         self.train_model = train_model
         #self.step_model = step_model
@@ -90,14 +92,14 @@ class Model(tf.keras.Model):
 
             ##Fisher loss construction
             # TODO: This (up to def of params) also in 'with tf.GradientTape()'?
-            self.pg_fisher = pg_fisher_loss = -tf.reduce_mean(neglogpac)
+            self.pg_fisher = pg_fisher_loss = -tf.math.reduce_mean(neglogpac)
             sample_net = self.train_model.vf + tf.random_normal(tf.shape(self.train_model.vf))
-            self.vf_fisher = vf_fisher_loss = - self.vf_fisher_coef * tf.reduce_mean(
+            self.vf_fisher = vf_fisher_loss = - self.vf_fisher_coef * tf.math.reduce_mean(
                 tf.pow(self.train_model.vf - tf.stop_gradient(sample_net), 2))
             self.joint_fisher = joint_fisher_loss = pg_fisher_loss + vf_fisher_loss
 
         self.params = params = tape.watched_variables() #Old: find_trainable_variables("acktr_model")
-        # TODO: Alternative? --> self.params = params = self.train_model.trainable_variables
+        # TODO: Alternativ? --> self.params = params = self.train_model.trainable_variables
 
         self.grads_check = grads = tape.gradient(train_loss, params) # tf.gradients(train_loss, params)
         grads_and_params = list(zip(grads, params))

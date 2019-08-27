@@ -609,23 +609,20 @@ class KfacOptimizer():
             if KFAC_DEBUG:
                 self.eigen_update_list = [item for item in updateOps]
                 with tf.control_dependencies(updateOps):
-                    updateOps.append(tf.Print(tf.constant(
+                    updateOps.append(tf.print(tf.constant(
                         0.), [tf.convert_to_tensor('computed factor eigen')]))
 
         return updateOps
 
     def applyStatsEigen(self, eigen_list):
-        updateOps = []
         print(('updating %d eigenvalue/vectors' % len(eigen_list)))
         for i, (tensor, mark) in enumerate(zip(eigen_list, self.eigen_update_list)):
             stats_eigen_var = self.eigen_reverse_lookup[mark]
             stats_eigen_var.assign(tensor, use_locking=True)
 
-        with tf.control_dependencies(updateOps):
-            self.factor_step.assign_add(1)
-            if KFAC_DEBUG:
-                updateOps.append(tf.Print(tf.constant(
-                    0.), [tf.convert_to_tensor('updated kfac factors')]))
+        self.factor_step.assign_add(1)
+        if KFAC_DEBUG:
+            tf.print(tf.constant(0.), [tf.convert_to_tensor('updated kfac factors')])
 
     def getKfacPrecondUpdates(self, gradlist, varlist):
         updatelist = []
@@ -854,7 +851,7 @@ class KfacOptimizer():
         # compute updates
         assert self._update_stats_op != None
         dependency_list = []
-        if not self._async:
+        if not self._async: # TODO: We don't have OPs anymore!?
             dependency_list.append(self._update_stats_op)
 
 
@@ -929,7 +926,7 @@ class KfacOptimizer():
             self.sgd_step.assign_add(1)
             coldOptim.apply_gradients(sgd_grads)
             if KFAC_DEBUG:
-                print('{} doing cold sgd step'.format(self.sgd_step))
+                tf.print('{} doing cold sgd step'.format(self.sgd_step))
 
         else:
             qr = self.apply_gradients_kfac(grads)
