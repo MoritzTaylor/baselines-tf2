@@ -71,22 +71,26 @@ class Model(tf.keras.Model):
 
         with tf.GradientTape() as tape:
             # TODO: explicit watching gradients with tape.watch(x)?
-            for step in range(len(obs)):
-                cur_lr = self.lr.value()
+            # for step in range(obs.shape[0]):
+            #     cur_lr = self.lr.value()
 
             # TODO: Like A2C?
-            # policy_latent = self.train_model.policy_network(obs)
-            # pd, _ = self.train_model.pdtype.pdfromlatent(policy_latent)
-            # neglogpac = pd.neglogp(actions)
+            policy_latent = self.train_model.policy_network(obs)
+            pd, pi = self.train_model.pdtype.pdfromlatent(policy_latent)
+            neglogpac = pd.neglogp(actions)
 
-            neglogpac = self.train_model.pd.neglogp(actions)
-            self.logits = self.train_model.pi
+            #neglogpac = self.train_model.pd.neglogp(actions)
+            self.logits = pi
 
             # TODO: states and masks like in the original implementation?
             pg_loss = tf.reduce_mean(advs * neglogpac)
-            entropy = tf.reduce_mean(self.train_model.pd.entropy())
+            entropy = tf.reduce_mean(pd.entropy())
             pg_loss = pg_loss - self.ent_coef * entropy
-            vf_loss = tf.losses.mean_squared_error(tf.squeeze(self.train_model.vf), rewards)
+            vpred = self.train_model.value(obs)
+            vf_loss = tf.reduce_mean(tf.square(vpred - rewards))
+
+            #vf = tf.squeeze(self.train_model.value_fc(value_latent), axis=1)
+            #vf_loss = tf.losses.mean_squared_error(tf.squeeze(self.train_model.vf), rewards)
 
             train_loss = pg_loss + self.vf_coef*vf_loss
 

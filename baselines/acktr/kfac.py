@@ -1,4 +1,5 @@
 import tensorflow as tf
+import sys
 import numpy as np
 import re
 
@@ -588,31 +589,26 @@ class KfacOptimizer():
             # sync copied stats
             # with tf.control_dependencies(removeNone(stats[0]) +
             # removeNone(stats[1])):
-            with tf.control_dependencies([]):
-                for stats_var in stats_eigen:
-                    if stats_var not in computedEigen:
-                        eigens = tf.self_adjoint_eig(stats_var)
-                        e = eigens[0]
-                        Q = eigens[1]
-                        if self._use_float64:
-                            e = tf.cast(e, tf.float32)
-                            Q = tf.cast(Q, tf.float32)
-                        updateOps.append(e)
-                        updateOps.append(Q)
-                        computedEigen[stats_var] = {'e': e, 'Q': Q}
-                        eigen_reverse_lookup[e] = stats_eigen[stats_var]['e']
-                        eigen_reverse_lookup[Q] = stats_eigen[stats_var]['Q']
+            for stats_var in stats_eigen:
+                if stats_var not in computedEigen:
+                    eigens = tf.self_adjoint_eig(stats_var)
+                    e = eigens[0]
+                    Q = eigens[1]
+                    if self._use_float64:
+                        e = tf.cast(e, tf.float32)
+                        Q = tf.cast(Q, tf.float32)
+                    updateOps.append(e)
+                    updateOps.append(Q)
+                    computedEigen[stats_var] = {'e': e, 'Q': Q}
+                    eigen_reverse_lookup[e] = stats_eigen[stats_var]['e']
+                    eigen_reverse_lookup[Q] = stats_eigen[stats_var]['Q']
 
             self.eigen_reverse_lookup = eigen_reverse_lookup
             self.eigen_update_list = updateOps
 
             if KFAC_DEBUG:
                 self.eigen_update_list = [item for item in updateOps]
-                with tf.control_dependencies(updateOps):
-                    updateOps.append(tf.print(tf.constant(
-                        0.), [tf.convert_to_tensor('computed factor eigen')]))
-
-        return updateOps
+                tf.print(tf.constant(0.), [tf.convert_to_tensor('computed factor eigen')])
 
     def applyStatsEigen(self, eigen_list):
         print(('updating %d eigenvalue/vectors' % len(eigen_list)))
@@ -790,7 +786,7 @@ class KfacOptimizer():
             ### clipping ###
             if KFAC_DEBUG:
                 print(('apply clipping to %s' % (var.name)))
-            tf.Print(grad, [tf.sqrt(tf.reduce_sum(tf.pow(grad, 2)))], "Euclidean norm of new grad")
+            tf.print(grad, [tf.sqrt(tf.reduce_sum(tf.pow(grad, 2)))], "Euclidean norm of new grad")
             local_vg = tf.reduce_sum(grad * g * (self._lr * self._lr))
             vg += local_vg
 
@@ -802,10 +798,13 @@ class KfacOptimizer():
         if KFAC_DEBUG:
             scaling = tf.Print(scaling, [tf.convert_to_tensor(
                 'clip: '), scaling, tf.convert_to_tensor(' vFv: '), vg])
-        with tf.control_dependencies([self.vFv.assign_add(vg)]):
-            updatelist = [grad_dict[var] for var in varlist]
-            for i, item in enumerate(updatelist):
-                updatelist[i] = scaling * item
+        # with tf.control_dependencies([self.vFv.assign_add(vg)]):
+        #     updatelist = [grad_dict[var] for var in varlist]
+        #     for i, item in enumerate(updatelist):
+        #         updatelist[i] = scaling * item
+        updatelist = [grad_dict[var] for var in varlist]
+        for i, item in enumerate(updatelist):
+            updatelist[i] = scaling * item
 
         return updatelist
 
