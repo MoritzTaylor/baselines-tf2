@@ -60,7 +60,7 @@ class KfacOptimizer():
         self.stats_eigen = {}
 
     def getFactors(self, g, varlist):
-        graph = tf.get_default_graph()
+        #graph = tf.get_default_graph()
         factorTensors = {}
         fpropTensors = []
         bpropTensors = []
@@ -83,47 +83,44 @@ class KfacOptimizer():
                     factors.append(searchFactors(g, graph))
                 op_names = [item['opName'] for item in factors]
                 # TO-DO: need to check all the attribute of the ops as well
-                print (gradient.name)
-                print (op_names)
-                print (len(np.unique(op_names)))
+                print(gradient.name)
+                print(op_names)
+                print(len(np.unique(op_names)))
                 assert len(np.unique(op_names)) == 1, gradient.name + \
                     ' is shared among different computation OPs'
 
-                bTensors = reduce(lambda x, y: x + y,
-                                  [item['bpropFactors'] for item in factors])
+                bTensors = reduce(lambda x, y: x + y, [item['bpropFactors'] for item in factors])
                 if len(factors[0]['fpropFactors']) > 0:
-                    fTensors = reduce(
-                        lambda x, y: x + y, [item['fpropFactors'] for item in factors])
+                    fTensors = reduce(lambda x, y: x + y, [item['fpropFactors'] for item in factors])
                 fpropOp_name = op_names[0]
                 fpropOp = factors[0]['op']
             else:
-                fpropOp_name = re.search(
-                    'gradientsSampled(_[0-9]+|)/(.+?)_grad', bpropOp_name).group(2)
+                fpropOp_name = re.search('gradientsSampled(_[0-9]+|)/(.+?)_grad', bpropOp_name).group(2)
                 fpropOp = graph.get_operation_by_name(fpropOp_name)
                 if fpropOp.op_def.name in KFAC_OPS:
                     # Known OPs
                     ###
-                    bTensor = [
-                        i for i in bpropOp.inputs if 'gradientsSampled' in i.name][-1]
+                    bTensor = [i for i in bpropOp.inputs if 'gradientsSampled' in i.name][-1]
                     bTensorShape = fpropOp.outputs[0].get_shape()
-                    if bTensor.get_shape()[0].value == None:
+                    #TODO: OLD: if bTensor.get_shape()[0].value == None:
+                    if bTensor.get_shape()[0] == None:
                         bTensor.set_shape(bTensorShape)
                     bTensors.append(bTensor)
                     ###
                     if fpropOp.op_def.name == 'BiasAdd':
                         fTensors = []
                     else:
-                        fTensors.append(
-                            [i for i in fpropOp.inputs if param.op.name not in i.name][0])
+                        # TODO: AttributeError: Tensor.op is meaningless when eager execution is enabled.
+                        fTensors.append([i for i in fpropOp.inputs if param.op.name not in i.name][0])
                     fpropOp_name = fpropOp.op_def.name
                 else:
                     # unknown OPs, block approximation used
-                    bInputsList = [i for i in bpropOp.inputs[
-                        0].op.inputs if 'gradientsSampled' in i.name if 'Shape' not in i.name]
+                    bInputsList = [i for i in bpropOp.inputs[0].op.inputs if 'gradientsSampled' in i.name if 'Shape' not in i.name]
                     if len(bInputsList) > 0:
                         bTensor = bInputsList[0]
                         bTensorShape = fpropOp.outputs[0].get_shape()
-                        if len(bTensor.get_shape()) > 0 and bTensor.get_shape()[0].value == None:
+                        if len(bTensor.get_shape()) > 0 and bTensor.get_shape()[0] == None:
+                                #TODO: OLD: and bTensor.get_shape()[0].value == None:
                             bTensor.set_shape(bTensorShape)
                         bTensors.append(bTensor)
                     fpropOp_name = opTypes.append('UNK-' + fpropOp.op_def.name)
@@ -133,7 +130,8 @@ class KfacOptimizer():
         for t, param in zip(g, varlist):
             if KFAC_DEBUG:
                 print(('get factor for '+param.name))
-            factors = searchFactors(t, graph)
+            #TODO: OLD: factors = searchFactors(t, graph)
+            factors = searchFactors(t, t.graph)
             factorTensors[param] = factors
 
         ########
@@ -832,14 +830,14 @@ class KfacOptimizer():
 
             # define a queue for the list of factor loading tensors
             # TODO: OLD: tf.FIFOQueue
-            queue = tf.queue.FIFOQueue(1, [item.dtype for item in factorOps_dummy], shapes=[
-                                 item.get_shape() for item in factorOps_dummy])
+            queue = tf.queue.FIFOQueue(1,
+                                       [item.dtype for item in factorOps_dummy],
+                                       shapes=[item.get_shape() for item in factorOps_dummy])
 
-            enqueue_op = tf.cond(tf.logical_and(tf.equal(tf.math.mod(self.stats_step, self._kfac_update),
-                                                         tf.convert_to_tensor(0)),
+            enqueue_op = tf.cond(tf.logical_and(tf.equal(tf.math.mod(self.stats_step, self._kfac_update), tf.convert_to_tensor(0)),
                                                 tf.greater_equal(self.stats_step, self._stats_accum_iter)),
                                  lambda: queue.enqueue(self.computeStatsEigen()),
-                                 tf.no_op)
+                                 tf.no_op) # TODO: Something like no_op in TF2?
 
             def dequeue_op():
                 return queue.dequeue()

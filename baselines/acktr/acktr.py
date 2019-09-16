@@ -97,9 +97,8 @@ class Model(tf.keras.Model):
             ##Fisher loss construction
             # TODO: This (up to def of params) also in 'with tf.GradientTape()'?
             self.pg_fisher = pg_fisher_loss = -tf.math.reduce_mean(neglogpac)
-            sample_net = self.train_model.vf + tf.random_normal(tf.shape(self.train_model.vf))
-            self.vf_fisher = vf_fisher_loss = - self.vf_fisher_coef * tf.math.reduce_mean(
-                tf.pow(self.train_model.vf - tf.stop_gradient(sample_net), 2))
+            sample_net = vpred + tf.random.normal(tf.shape(vpred))
+            self.vf_fisher = vf_fisher_loss = - self.vf_fisher_coef * tf.math.reduce_mean(tf.pow(vpred - tf.stop_gradient(sample_net), 2))
             self.joint_fisher = joint_fisher_loss = pg_fisher_loss + vf_fisher_loss
 
         self.params = params = tape.watched_variables() #Old: find_trainable_variables("acktr_model")
@@ -155,7 +154,7 @@ def learn(network, env, seed, total_timesteps=int(40e6), gamma=0.99, log_interva
     tstart = time.time()
     coord = tf.train.Coordinator()
     if is_async:
-        # TODO
+        # TODO: q_runner
         enqueue_threads = model.q_runner.create_threads(model.sess, coord=coord, start=True)
     else:
         enqueue_threads = []
@@ -163,6 +162,15 @@ def learn(network, env, seed, total_timesteps=int(40e6), gamma=0.99, log_interva
     for update in range(1, total_timesteps//nbatch+1):
         obs, states, rewards, masks, actions, values, epinfos = runner.run()
         epinfobuf.extend(epinfos)
+
+        obs = tf.constant(obs)
+        if states is not None:
+            states = tf.constant(states)
+        rewards = tf.constant(rewards)
+        masks = tf.constant(masks)
+        actions = tf.constant(actions)
+        values = tf.constant(values)
+
         policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
         model.old_obs = obs
         nseconds = time.time()-tstart
